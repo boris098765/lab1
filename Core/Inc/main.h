@@ -59,34 +59,13 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 
-void CMD_Handler();
-void LED_CMD_Handle(uint8_t cmd_byte, uint32_t data_bytes);
-void SERVO_CMD_Handle(uint8_t cmd_byte, uint32_t data_bytes);
-void AddrLED_CMD_Handle(uint8_t cmd_byte, uint32_t data_bytes);
-
-void setup_TIM2();
-void TIM3_setup();
-void setup_TIM4();
-
-void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value);
-
-void setup_CRT();
-void set_CRT_Gamma(float gamma);
-void setFlashSpeed(float frequency);
-void calc_brightness_table();
-uint16_t get_CRT(uint16_t val);
-
-void SERVO_setAngle(uint16_t angle);
-
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define AddrLED_Pin GPIO_PIN_4
-#define AddrLED_GPIO_Port GPIOA
-#define SERVO_Pin GPIO_PIN_5
+#define SERVO_Pin GPIO_PIN_1
 #define SERVO_GPIO_Port GPIOA
-#define LD4_Pin GPIO_PIN_12
-#define LD4_GPIO_Port GPIOD
+#define LED_Pin GPIO_PIN_12
+#define LED_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */
 
