@@ -77,9 +77,7 @@ float CRT_Gamma;
 
 uint8_t rx_buffer[FULL_MSG_LEN];
 uint8_t msg_buffer[FULL_MSG_LEN];
-uint8_t msg_received_flug;
-
-volatile uint8_t transmissionComplete = 0;
+volatile uint8_t msg_received_flug = 0;
 
 /* USER CODE END PV */
 
@@ -165,6 +163,7 @@ void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value) {
 void USART_DMA_RX_Init() {
 	__HAL_UART_ENABLE_IT(&huart2, UART_IT_RXNE);
 	__HAL_DMA_ENABLE_IT(&hdma_usart2_rx, DMA_IT_TC);
+
     HAL_UART_Receive_DMA(&huart2, rx_buffer, FULL_MSG_LEN);
 }
 
@@ -176,17 +175,19 @@ void USART_DMA_SendString(UART_HandleTypeDef *huart, const char *str) {
 
 /* -------------- */
 
-void USART_RECEIVE_Callback() {
-    uart_send("Поймал!!!\n\r");
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance != USART2) return;
+
+    memcpy(msg_buffer, rx_buffer, FULL_MSG_LEN);
+    msg_received_flug = 1;
 
     HAL_UART_Receive_DMA(&huart2, rx_buffer, FULL_MSG_LEN);
 }
 
-void DMA1_Channel5_IRQHandler(void) {
-	if (!__HAL_DMA_GET_FLAG(&hdma_usart2_rx, DMA_FLAG_TCIF1_5)) return;
-	__HAL_DMA_CLEAR_FLAG(&hdma_usart2_rx, DMA_FLAG_TCIF1_5);
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance != USART2) return;
 
-	USART_RECEIVE_Callback();
+    //
 }
 
 /* USER CODE END 0 */
@@ -238,6 +239,8 @@ int main(void)
   HAL_TIM_Base_Start(&htim8);
 
   uart_send("\nПогнали, йоптыть!\n\r");
+  HAL_Delay(500);
+  uart_send("Работает?\n\r");
 
   /* USER CODE END 2 */
 
@@ -248,7 +251,14 @@ int main(void)
   setPWM( &SERVO_TIMER, SERVO_CHANNEL, get_servo_CCR(0) );
 
   while (1) {
+	  if (msg_received_flug) {
+		  uart_send("Есть сообщение!\n\r");
+		  msg_received_flug = 0;
 
+		  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 1);
+		  HAL_Delay(1000);
+		  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 0);
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -528,6 +538,7 @@ static void MX_DMA_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
@@ -535,6 +546,16 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : ERROR_LED_Pin */
+  GPIO_InitStruct.Pin = ERROR_LED_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(ERROR_LED_GPIO_Port, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
