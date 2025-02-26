@@ -66,7 +66,7 @@ void Error_Handler(void);
 #define SERVO_GPIO_Port GPIOA
 #define LED_Pin GPIO_PIN_12
 #define LED_GPIO_Port GPIOD
-#define ERROR_LED_Pin GPIO_PIN_13
+#define ERROR_LED_Pin GPIO_PIN_14
 #define ERROR_LED_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */

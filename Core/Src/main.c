@@ -251,14 +251,14 @@ int main(void)
   setPWM( &SERVO_TIMER, SERVO_CHANNEL, get_servo_CCR(0) );
 
   while (1) {
-	  if (msg_received_flug) {
-		  uart_send("Есть сообщение!\n\r");
-		  msg_received_flug = 0;
+	if (msg_received_flug) {
+	  uart_send("Есть сообщение!\n\r");
+	  msg_received_flug = 0;
 
-		  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 1);
-		  HAL_Delay(1000);
-		  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 0);
-	  }
+	  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 1);
+	  HAL_Delay(1000);
+	  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 0);
+	}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -575,7 +575,10 @@ void Error_Handler(void)
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1) {
-	  //
+	HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 1);
+	HAL_Delay(500);
+	HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 0);
+	HAL_Delay(500);
   }
   /* USER CODE END Error_Handler_Debug */
 }
