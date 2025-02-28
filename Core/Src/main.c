@@ -37,7 +37,7 @@
 #define CRT_MAX               255
 #define CRT_TABLE_LEN         ( CRT_MAX * 2 )
 
-#define MAIN_LED_FLASH_FREQ   2
+#define MAIN_LED_FLASH_FREQ   120
 
 /* USER CODE END PD */
 
@@ -70,6 +70,8 @@ uint16_t LED_Period;
 float CRT_K;
 float CRT_Gamma;
 
+uint16_t led_brightness_table[CRT_TABLE_LEN];
+
 /* -------------- */
 
 #define MSG_LEN            7
@@ -100,18 +102,25 @@ uint16_t get_servo_CCR(uint16_t angle);
 
 void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value);
 
-void USART_DMA_RX_Init();
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 void USART_DMA_SendString(UART_HandleTypeDef *huart, const char *str);
+
+void message_Processing(uint8_t* message);
+void LED_Processing(uint8_t func, uint32_t data);
+void SERVO_Processing(uint8_t func, uint32_t data);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void calc_CRT_K() {
+	CRT_K = ( CRT_MAX / (pow(CRT_MAX, CRT_Gamma)) );
+}
+
 void setup_CRT() {
 	CRT_Gamma = CRT_GAMMA;
-	CRT_K = ( CRT_MAX / (pow(CRT_MAX, CRT_Gamma)) );
+	calc_CRT_K();
 }
 
 uint16_t get_CRT(uint16_t val) {
@@ -130,6 +139,7 @@ void set_blink_frequency(TIM_HandleTypeDef *htim, uint32_t freq) {
     uint32_t period = 0;
 
     freq *= CRT_TABLE_LEN;
+    freq /= 60;
 
     if (freq > 0) {
         uint32_t tick_freq = MAIN_CLOCK / (TIM8_PRESC + 1);
@@ -138,6 +148,9 @@ void set_blink_frequency(TIM_HandleTypeDef *htim, uint32_t freq) {
 
     __HAL_TIM_SET_AUTORELOAD(htim, period);
 }
+
+#define LED_Enable()      HAL_TIM_PWM_Start(&htim4, LED_CHANNEL);
+#define LED_Disable()     HAL_TIM_PWM_Stop(&htim4, LED_CHANNEL);
 
 /* -------------- */
 
@@ -152,6 +165,8 @@ uint16_t get_servo_CCR(uint16_t angle) {
 	return ccr;
 }
 
+#define Servo_setAngle(a)    setPWM( &SERVO_TIMER, SERVO_CHANNEL, get_servo_CCR(a) );
+
 /* -------------- */
 
 void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value) {
@@ -160,12 +175,7 @@ void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value) {
 
 /* -------------- */
 
-void USART_DMA_RX_Init() {
-	__HAL_UART_ENABLE_IT(&huart2, UART_IT_RXNE);
-	__HAL_DMA_ENABLE_IT(&hdma_usart2_rx, DMA_IT_TC);
-
-    HAL_UART_Receive_DMA(&huart2, rx_buffer, FULL_MSG_LEN);
-}
+#define USART_DMA_RX_Init()     HAL_UART_Receive_DMA(&huart2, rx_buffer, FULL_MSG_LEN);
 
 void USART_DMA_SendString(UART_HandleTypeDef *huart, const char *str) {
     uint16_t len = strlen(str);
@@ -178,16 +188,73 @@ void USART_DMA_SendString(UART_HandleTypeDef *huart, const char *str) {
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance != USART2) return;
 
-    memcpy(msg_buffer, rx_buffer, FULL_MSG_LEN);
+    memmove(msg_buffer, rx_buffer, FULL_MSG_LEN);
     msg_received_flug = 1;
-
-    HAL_UART_Receive_DMA(&huart2, rx_buffer, FULL_MSG_LEN);
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance != USART2) return;
 
     //
+}
+
+/* -------------- */
+
+uint8_t crc8(const uint8_t *data, size_t length) {
+    uint8_t crc = 0x00;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            if (crc & 0x80) crc = (crc << 1) ^ 0x07;
+            else crc <<= 1;
+        }
+    }
+    return crc;
+}
+
+void message_Processing(uint8_t *message) {
+	uint8_t first_byte  = message[0];
+	uint8_t target_byte = message[1];
+	uint8_t func_byte   = message[2];
+	uint32_t data_bytes = (uint32_t)message[3] << 24 |
+			              (uint32_t)message[4] << 16 |
+						  (uint32_t)message[5] << 8 |
+						  (uint32_t)message[6] << 0;
+
+	if (first_byte != 0xFF) return;
+
+	switch (target_byte) {
+	case 0x00:
+		LED_Processing(func_byte, data_bytes);
+		break;
+	case 0x01:
+		SERVO_Processing(func_byte, data_bytes);
+		break;
+	}
+}
+
+void LED_Processing(uint8_t func, uint32_t data) {
+	switch (func) {
+	case 0x00: // ON / OFF
+		if (data & 0x01) LED_Enable() else LED_Disable();
+		break;
+	case 0x01: // Frequency
+		set_blink_frequency(&htim8, data);
+		break;
+	case 0x02: // Gamma
+		CRT_Gamma = (float)data/10;
+		calc_CRT_K();
+		calc_brightness_table(led_brightness_table);
+		break;
+	}
+}
+
+void SERVO_Processing(uint8_t func, uint32_t data) {
+	switch (func) {
+	case 0x00: // Угол
+		Servo_setAngle((uint16_t)data);
+		break;
+	}
 }
 
 /* USER CODE END 0 */
@@ -230,10 +297,9 @@ int main(void)
   USART_DMA_RX_Init();
 
   setup_CRT();
-  uint16_t led_brightness_table[CRT_TABLE_LEN];
   calc_brightness_table(led_brightness_table);
 
-  HAL_TIM_PWM_Start(&htim4, LED_CHANNEL);
+  LED_Enable();
   HAL_TIM_PWM_Start(&SERVO_TIMER, SERVO_CHANNEL);
   HAL_DMA_Start(&hdma_tim8_up, (uint32_t)led_brightness_table, (uint32_t)&TIM4->CCR1, CRT_TABLE_LEN);
   HAL_TIM_Base_Start(&htim8);
@@ -247,19 +313,17 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  set_blink_frequency(&htim8, 2);
-  setPWM( &SERVO_TIMER, SERVO_CHANNEL, get_servo_CCR(0) );
+  set_blink_frequency(&htim8, MAIN_LED_FLASH_FREQ);
+  Servo_setAngle(0);
 
   while (1) {
-	if (msg_received_flug) {
-	  uart_send("Есть сообщение!\n\r");
-	  msg_received_flug = 0;
+	if (!msg_received_flug) continue;
 
-	  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 1);
-	  HAL_Delay(1000);
-	  HAL_GPIO_WritePin(ERROR_LED_GPIO_Port, ERROR_LED_Pin, 0);
-	}
-    /* USER CODE END WHILE */
+	msg_received_flug = 0;
+	message_Processing(msg_buffer);
+	USART_DMA_RX_Init();
+
+	/* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
