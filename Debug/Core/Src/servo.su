@@ -1,0 +1,2 @@
+../Core/Src/servo.c:4:6:SERVO_TimerInit	64	static
+../Core/Src/servo.c:45:10:SERVO_getCCR	24	static

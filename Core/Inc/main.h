@@ -35,6 +35,9 @@ extern "C" {
 #include <math.h>
 #include <string.h>
 
+#include "define.h"
+#include "servo.h"
+
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -62,8 +65,6 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define SERVO_Pin GPIO_PIN_1
-#define SERVO_GPIO_Port GPIOA
 #define LED_Pin GPIO_PIN_12
 #define LED_GPIO_Port GPIOD
 #define ERROR_LED_Pin GPIO_PIN_14

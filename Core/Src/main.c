@@ -16,19 +16,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define MAIN_CLOCK            64000000
-
-/* -------------- */
-
-#define SERVO_TIMER_FREQUENCY     50                                  // Hz
-#define SERVO_TIMER_PERIOD        (1000000 / SERVO_TIMER_FREQUENCY)   // Hz
-#define SERVO_TIMER_RESOLUTION    2048                                //
-
-#define SERVO_MAX_ANGLE           180                                 // degrees
-#define SERVO_MIN_IMP             500                                 // us
-#define SERVO_MAX_IMP             2450                                // us
-#define SERVO_DELTA_IMP           ( SERVO_MAX_IMP - SERVO_MIN_IMP )   // us
-
 /* -------------- */
 
 #define TIM8_PRESC            ( 125 - 1 )
@@ -58,11 +45,10 @@ DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 
-#define SERVO_TIMER               htim2
-#define SERVO_CHANNEL             TIM_CHANNEL_2
-
 #define LED_TIMER                 htim4
 #define LED_CHANNEL               TIM_CHANNEL_1
+
+#define LED_SET_TIMER             htim8
 
 /* -------------- */
 
@@ -87,7 +73,6 @@ volatile uint8_t msg_received_flug = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_TIM2_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_USART2_UART_Init(void);
@@ -98,16 +83,12 @@ uint16_t get_CRT(uint16_t val);
 void calc_brightness_table(uint16_t *table);
 void set_blink_frequency(TIM_HandleTypeDef *htim, uint32_t freq);
 
-uint16_t get_servo_CCR(uint16_t angle);
-
-void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value);
-
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 void USART_DMA_SendString(UART_HandleTypeDef *huart, const char *str);
 
-void message_Processing(uint8_t* message);
-void LED_Processing(uint8_t func, uint32_t data);
-void SERVO_Processing(uint8_t func, uint32_t data);
+void messageProcessing(uint8_t* message);
+void LEDProcessing(uint8_t func, uint32_t data);
+void ServoProcessing(uint8_t func, uint32_t data);
 
 /* USER CODE END PFP */
 
@@ -154,27 +135,6 @@ void set_blink_frequency(TIM_HandleTypeDef *htim, uint32_t freq) {
 
 /* -------------- */
 
-uint16_t get_servo_CCR(uint16_t angle) {
-	if (angle > SERVO_MAX_ANGLE) angle = SERVO_MAX_ANGLE;
-
-	uint16_t imp = SERVO_MIN_IMP + ( SERVO_DELTA_IMP * angle / SERVO_MAX_ANGLE );
-	uint16_t ccr = (imp * SERVO_TIMER_RESOLUTION) / SERVO_TIMER_PERIOD - 1;
-
-	if (ccr >= SERVO_TIMER_RESOLUTION) ccr = SERVO_TIMER_RESOLUTION - 1;
-
-	return ccr;
-}
-
-#define Servo_setAngle(a)    setPWM( &SERVO_TIMER, SERVO_CHANNEL, get_servo_CCR(a) );
-
-/* -------------- */
-
-void setPWM(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t value) {
-	__HAL_TIM_SET_COMPARE(htim, channel, value);
-}
-
-/* -------------- */
-
 #define USART_DMA_RX_Init()     HAL_UART_Receive_DMA(&huart2, rx_buffer, FULL_MSG_LEN);
 
 void USART_DMA_SendString(UART_HandleTypeDef *huart, const char *str) {
@@ -212,7 +172,7 @@ uint8_t crc8(const uint8_t *data, size_t length) {
     return crc;
 }
 
-void message_Processing(uint8_t *message) {
+void messageProcessing(uint8_t *message) {
 	uint8_t first_byte  = message[0];
 	uint8_t target_byte = message[1];
 	uint8_t func_byte   = message[2];
@@ -220,26 +180,28 @@ void message_Processing(uint8_t *message) {
 			              (uint32_t)message[4] << 16 |
 						  (uint32_t)message[5] << 8 |
 						  (uint32_t)message[6] << 0;
+	uint8_t crc_byte    = message[7];
 
 	if (first_byte != 0xFF) return;
+	if (crc_byte != crc8(message, 7)) return;
 
 	switch (target_byte) {
 	case 0x00:
-		LED_Processing(func_byte, data_bytes);
+		LEDProcessing(func_byte, data_bytes);
 		break;
 	case 0x01:
-		SERVO_Processing(func_byte, data_bytes);
+		ServoProcessing(func_byte, data_bytes);
 		break;
 	}
 }
 
-void LED_Processing(uint8_t func, uint32_t data) {
+void LEDProcessing(uint8_t func, uint32_t data) {
 	switch (func) {
 	case 0x00: // ON / OFF
 		if (data & 0x01) LED_Enable() else LED_Disable();
 		break;
 	case 0x01: // Frequency
-		set_blink_frequency(&htim8, data);
+		set_blink_frequency(&LED_SET_TIMER, data);
 		break;
 	case 0x02: // Gamma
 		CRT_Gamma = (float)data/10;
@@ -249,10 +211,10 @@ void LED_Processing(uint8_t func, uint32_t data) {
 	}
 }
 
-void SERVO_Processing(uint8_t func, uint32_t data) {
+void ServoProcessing(uint8_t func, uint32_t data) {
 	switch (func) {
 	case 0x00: // Угол
-		Servo_setAngle((uint16_t)data);
+		SERVO_setAngle((uint16_t)data);
 		break;
 	}
 }
@@ -288,21 +250,23 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_TIM2_Init();
   MX_TIM4_Init();
   MX_TIM8_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  SERVO_TimerInit();
 
   USART_DMA_RX_Init();
 
   setup_CRT();
   calc_brightness_table(led_brightness_table);
 
+  SERVO_Enable();
+
   LED_Enable();
-  HAL_TIM_PWM_Start(&SERVO_TIMER, SERVO_CHANNEL);
   HAL_DMA_Start(&hdma_tim8_up, (uint32_t)led_brightness_table, (uint32_t)&TIM4->CCR1, CRT_TABLE_LEN);
-  HAL_TIM_Base_Start(&htim8);
+  HAL_TIM_Base_Start(&LED_SET_TIMER);
 
   uart_send("\nПогнали, йоптыть!\n\r");
   HAL_Delay(500);
@@ -313,17 +277,17 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  set_blink_frequency(&htim8, MAIN_LED_FLASH_FREQ);
-  Servo_setAngle(0);
+  set_blink_frequency(&LED_SET_TIMER, MAIN_LED_FLASH_FREQ);
+  SERVO_setAngle(0);
 
   while (1) {
 	if (!msg_received_flug) continue;
 
 	msg_received_flug = 0;
-	message_Processing(msg_buffer);
+	messageProcessing(msg_buffer);
 	USART_DMA_RX_Init();
 
-	/* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
@@ -373,65 +337,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 625-1;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 2048-1;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
-
 }
 
 /**
@@ -493,50 +398,27 @@ static void MX_TIM4_Init(void)
 
 }
 
-/**
-  * @brief TIM8 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM8_Init(void)
-{
-
-  /* USER CODE BEGIN TIM8_Init 0 */
-
-  /* USER CODE END TIM8_Init 0 */
-
+static void MX_TIM8_Init(void) {
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM8_Init 1 */
+  LED_SET_TIMER.Instance = TIM8;
+  LED_SET_TIMER.Init.Prescaler = 125-1;
+  LED_SET_TIMER.Init.CounterMode = TIM_COUNTERMODE_UP;
+  LED_SET_TIMER.Init.Period = 1003;
+  LED_SET_TIMER.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  LED_SET_TIMER.Init.RepetitionCounter = 0;
+  LED_SET_TIMER.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&LED_SET_TIMER) != HAL_OK) Error_Handler();
 
-  /* USER CODE END TIM8_Init 1 */
-  htim8.Instance = TIM8;
-  htim8.Init.Prescaler = 125-1;
-  htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim8.Init.Period = 1003;
-  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim8.Init.RepetitionCounter = 0;
-  htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
-  {
-    Error_Handler();
-  }
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim8, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
+  if (HAL_TIM_ConfigClockSource(&LED_SET_TIMER, &sClockSourceConfig) != HAL_OK) Error_Handler();
+
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM8_Init 2 */
-  TIM8->DIER |= TIM_DIER_UDE;
-  /* USER CODE END TIM8_Init 2 */
+  if (HAL_TIMEx_MasterConfigSynchronization(&LED_SET_TIMER, &sMasterConfig) != HAL_OK) Error_Handler();
 
+  TIM8->DIER |= TIM_DIER_UDE;
 }
 
 /**
@@ -582,14 +464,12 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA2_CLK_ENABLE();
   __HAL_RCC_DMA1_CLK_ENABLE();
 
-  /* DMA interrupt init */
-  /* DMA1_Stream5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
-  /* DMA1_Stream6_IRQn interrupt configuration */
+
   HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
-  /* DMA2_Stream1_IRQn interrupt configuration */
+
   HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
 
